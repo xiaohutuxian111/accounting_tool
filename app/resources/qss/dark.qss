@@ -1,0 +1,15 @@
+QWidget {
+    background-color: #2e2e2e;
+    color: #ffffff;
+}
+
+QPushButton {
+    background-color: #4d4d4d;
+    color: #ffffff;
+    border-radius: 5px;
+    padding: 10px;
+}
+
+QPushButton:hover {
+    background-color: #666666;
+}
