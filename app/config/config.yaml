@@ -1,0 +1,21 @@
+app:
+  name: 发票识别助手
+  theme: dark
+  theme_color: '#2dd36f'
+  language: zh-CN
+  remember_window_size: true
+  window_width: 1920
+  window_height: 1152
+ocr:
+  engine: paddleocr
+  lang: ch
+  use_gpu: false
+  save_debug_image: true
+storage:
+  db_path: data/db/accounting.db
+  export_dir: data/export
+  debug_dir: data/debug
+  temp_dir: data/temp
+log:
+  level: INFO
+  dir: logs
