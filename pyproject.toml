@@ -8,5 +8,6 @@ dependencies = [
     "paddleocr>=3.4.0",
     "paddlepaddle>=3.3.1",
     "pyside6>=6.11.0",
+    "pyside6-fluent-widgets>=1.11.2",
     "pyyaml>=6.0.2",
 ]

@@ -1,17 +1,14 @@
 # -*- coding: utf-8 -*-
-# @Time : 2026/4/14 09:33
-# @Author : stone
-
-
 from __future__ import annotations
 
 import sys
+
 from PySide6.QtWidgets import QApplication
+from qfluentwidgets import Theme, setTheme, setThemeColor
 
 from app.bootstrap import bootstrap
 from app.cli import build_parser
 from app.gui.app_window import AppWindow
-from app.services.theme_service import load_theme_qss
 
 
 def main():
@@ -20,17 +17,24 @@ def main():
 
     config = bootstrap(args)
 
-    # CLI 模式
     if args.command == "invoice-ocr":
-        from app.services.invoice_ocr_service import InvoiceOCRService
-        service = InvoiceOCRService()
+        from app.modules.invoice.application.invoice_ocr_service import InvoiceOCRService
+
+        service = InvoiceOCRService(config)
         result = service.process(args.file)
         print(result)
         return
 
-    # GUI 模式
     app = QApplication(sys.argv)
-    app.setStyleSheet(load_theme_qss(config.get("app.theme", "dark")))
+
+    theme_name = config.get("app.theme", "dark")
+    theme_map = {
+        "dark": Theme.DARK,
+        "light": Theme.LIGHT,
+        "auto": Theme.AUTO,
+    }
+    setTheme(theme_map.get(theme_name, Theme.DARK))
+    setThemeColor(config.get("app.theme_color", "#2dd36f"))
 
     window = AppWindow(config)
     window.show()

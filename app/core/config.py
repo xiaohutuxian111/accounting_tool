@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-# @Time : 2026/4/14 09:34
-# @Author : stone
-
-
-
 from __future__ import annotations
 
 import argparse
@@ -16,10 +11,13 @@ import yaml
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "app": {
-        "name": "财税工作台",
+        "name": "发票识别助手",
         "theme": "dark",
+        "theme_color": "#2dd36f",
         "language": "zh-CN",
         "remember_window_size": True,
+        "window_width": 1050,
+        "window_height": 800,
     },
     "ocr": {
         "engine": "paddleocr",
@@ -32,10 +30,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "export_dir": "data/export",
         "debug_dir": "data/debug",
         "temp_dir": "data/temp",
-    },
-    "invoice": {
-        "auto_validate": True,
-        "auto_save_to_ledger": False,
     },
     "log": {
         "level": "INFO",
@@ -58,28 +52,29 @@ class AppConfig:
     def __init__(self, cli_args: argparse.Namespace | None = None) -> None:
         self.config = dict(DEFAULT_CONFIG)
 
-        # 1) 配置文件
         config_path = Path("config/config.yaml")
         if config_path.exists():
-            with config_path.open("r", encoding="utf-8") as f:
-                file_config = yaml.safe_load(f) or {}
+            with config_path.open("r", encoding="utf-8") as file:
+                file_config = yaml.safe_load(file) or {}
             self.config = deep_merge(self.config, file_config)
 
-        # 2) 环境变量
         env_config = self._load_from_env()
         self.config = deep_merge(self.config, env_config)
 
-        # 3) CLI 参数
         if cli_args:
             cli_config = self._load_from_cli(cli_args)
             self.config = deep_merge(self.config, cli_config)
 
     def _load_from_env(self) -> dict[str, Any]:
-        env = {}
+        env: dict[str, Any] = {}
 
         theme = os.getenv("ACCOUNTING_TOOL_APP_THEME")
         if theme:
             env.setdefault("app", {})["theme"] = theme
+
+        theme_color = os.getenv("ACCOUNTING_TOOL_APP_THEME_COLOR")
+        if theme_color:
+            env.setdefault("app", {})["theme_color"] = theme_color
 
         log_level = os.getenv("ACCOUNTING_TOOL_LOG_LEVEL")
         if log_level:
@@ -92,7 +87,7 @@ class AppConfig:
         return env
 
     def _load_from_cli(self, args: argparse.Namespace) -> dict[str, Any]:
-        cli = {}
+        cli: dict[str, Any] = {}
 
         if getattr(args, "theme", None):
             cli.setdefault("app", {})["theme"] = args.theme
@@ -115,5 +110,5 @@ class AppConfig:
 
     def save(self, path: str = "config/config.yaml") -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(self.config, f, allow_unicode=True, sort_keys=False)
+        with open(path, "w", encoding="utf-8") as file:
+            yaml.safe_dump(self.config, file, allow_unicode=True, sort_keys=False)

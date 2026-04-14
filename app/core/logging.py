@@ -19,7 +19,7 @@ def setup_logger(log_dir: str, level: str = "INFO") -> None:
         sys.stdout,
         level=level,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level}</level> | {message}",
-        enqueue=True,
+        enqueue=False,
     )
     logger.add(
         str(Path(log_dir) / "app.log"),
@@ -27,5 +27,5 @@ def setup_logger(log_dir: str, level: str = "INFO") -> None:
         rotation="10 MB",
         retention="7 days",
         encoding="utf-8",
-        enqueue=True,
+        enqueue=False,
     )

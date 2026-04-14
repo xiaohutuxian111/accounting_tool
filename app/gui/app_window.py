@@ -1,60 +1,67 @@
 # -*- coding: utf-8 -*-
-# @Time : 2026/4/14 09:46
-# @Author : stone
-
-
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
-from app.gui.navigation.sidebar import Sidebar
-from app.gui.pages.dashboard_page import DashboardPage
-from app.gui.pages.invoice_ocr_page import InvoiceOCRPage
-from app.gui.pages.ledger_page import LedgerPage
-from app.gui.pages.analytics_page import AnalyticsPage
+from PySide6.QtGui import QCloseEvent
+from qfluentwidgets import FluentIcon as FIF
+from qfluentwidgets import FluentWindow, NavigationItemPosition, Theme, setTheme, setThemeColor
+
+from app.modules.invoice.ui.invoice_ocr_page import InvoiceOCRPage
 from app.gui.pages.settings_page import SettingsPage
-from app.gui.pages.log_page import LogPage
+from app.services.settings_service import SettingsService
 
 
-class AppWindow(QMainWindow):
+class AppWindow(FluentWindow):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.setWindowTitle(config.get("app.name"))
-        self.resize(1360, 860)
+        self.settings_service = SettingsService(config)
 
-        central = QWidget()
-        self.setCentralWidget(central)
+        self.setWindowTitle(config.get("app.name", "发票识别助手"))
+        self.resize(
+            config.get("app.window_width", 1050),
+            config.get("app.window_height", 800),
+        )
+        self.setMinimumWidth(700)
 
-        layout = QHBoxLayout(central)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        self.invoiceInterface = InvoiceOCRPage(config)
+        self.invoiceInterface.setWindowTitle("发票识别")
 
-        self.sidebar = Sidebar()
-        self.stack = QStackedWidget()
+        self.settingsInterface = SettingsPage(config, self)
+        self.settingsInterface.setWindowTitle("设置")
 
-        # Page Initialization
-        self.dashboard_page = DashboardPage()
-        self.invoice_ocr_page = InvoiceOCRPage(config)
-        self.ledger_page = LedgerPage(config)
-        self.analytics_page = AnalyticsPage()
-        self.settings_page = SettingsPage(config)
-        self.log_page = LogPage(config)
+        self._init_navigation()
+        self.apply_theme(config.get("app.theme", "dark"))
+        self.apply_theme_color(config.get("app.theme_color", "#2dd36f"))
 
-        # Add pages to the stacked widget
-        self.stack.addWidget(self.dashboard_page)
-        self.stack.addWidget(self.invoice_ocr_page)
-        self.stack.addWidget(self.ledger_page)
-        self.stack.addWidget(self.analytics_page)
-        self.stack.addWidget(self.settings_page)
-        self.stack.addWidget(self.log_page)
+        self.settingsInterface.theme_changed.connect(self.apply_theme)
+        self.settingsInterface.theme_color_changed.connect(self.apply_theme_color)
 
-        layout.addWidget(self.sidebar)
-        layout.addWidget(self.stack, 1)
-
-        # Signal to change pages
-        self.sidebar.page_changed.connect(self.stack.setCurrentIndex)
-        self.settings_page.theme_changed.connect(self.apply_theme)
+    def _init_navigation(self):
+        self.addSubInterface(self.invoiceInterface, FIF.DOCUMENT, "发票识别")
+        self.navigationInterface.addSeparator()
+        self.addSubInterface(
+            self.settingsInterface,
+            FIF.SETTING,
+            "设置",
+            NavigationItemPosition.BOTTOM,
+        )
+        self.switchTo(self.invoiceInterface)
 
     def apply_theme(self, theme_name: str) -> None:
-        from app.services.theme_service import load_theme_qss
-        self.setStyleSheet(load_theme_qss(theme_name))
+        theme_map = {
+            "dark": Theme.DARK,
+            "light": Theme.LIGHT,
+            "auto": Theme.AUTO,
+        }
+        setTheme(theme_map.get(theme_name, Theme.DARK))
+
+    def apply_theme_color(self, color: str) -> None:
+        setThemeColor(color or "#2dd36f")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.config.get("app.remember_window_size", True):
+            self.config.config.setdefault("app", {})["window_width"] = self.width()
+            self.config.config.setdefault("app", {})["window_height"] = self.height()
+            self.settings_service.save()
+
+        super().closeEvent(event)
