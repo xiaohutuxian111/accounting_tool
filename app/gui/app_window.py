@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QGuiApplication
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentWindow, NavigationItemPosition, Theme, setTheme, setThemeColor
 
-from app.modules.invoice.ui.invoice_ocr_page import InvoiceOCRPage
 from app.gui.pages.settings_page import SettingsPage
+from app.modules.invoice.ui.invoice_ocr_page import InvoiceOCRPage
 from app.services.settings_service import SettingsService
 
 
@@ -17,10 +17,8 @@ class AppWindow(FluentWindow):
         self.settings_service = SettingsService(config)
 
         self.setWindowTitle(config.get("app.name", "发票识别助手"))
-        self.resize(
-            config.get("app.window_width", 1050),
-            config.get("app.window_height", 800),
-        )
+        self.setWindowIcon(FIF.QUICK_NOTE.icon())
+        self._apply_initial_window_size()
         self.setMinimumWidth(700)
 
         self.invoiceInterface = InvoiceOCRPage(config)
@@ -37,7 +35,7 @@ class AppWindow(FluentWindow):
         self.settingsInterface.theme_color_changed.connect(self.apply_theme_color)
 
     def _init_navigation(self):
-        self.addSubInterface(self.invoiceInterface, FIF.DOCUMENT, "发票识别")
+        self.addSubInterface(self.invoiceInterface, FIF.QUICK_NOTE, "发票识别")
         self.navigationInterface.addSeparator()
         self.addSubInterface(
             self.settingsInterface,
@@ -57,6 +55,20 @@ class AppWindow(FluentWindow):
 
     def apply_theme_color(self, color: str) -> None:
         setThemeColor(color or "#2dd36f")
+
+    def _apply_initial_window_size(self) -> None:
+        requested_width = int(self.config.get("app.window_width", 1050) or 1050)
+        requested_height = int(self.config.get("app.window_height", 800) or 800)
+
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self.resize(requested_width, requested_height)
+            return
+
+        available = screen.availableGeometry()
+        safe_width = max(900, min(requested_width, available.width() - 80))
+        safe_height = max(700, min(requested_height, available.height() - 80))
+        self.resize(safe_width, safe_height)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.config.get("app.remember_window_size", True):

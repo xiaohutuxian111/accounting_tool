@@ -49,12 +49,19 @@ class InvoiceRepository:
         return self.db.execute(sql, params)
 
     def exists_by_code_number(self, invoice_code: str | None, invoice_number: str | None) -> bool:
-        if not invoice_code or not invoice_number:
+        if not invoice_number:
             return False
-        row = self.db.fetch_one(
-            "SELECT id FROM invoices WHERE invoice_code = ? AND invoice_number = ? LIMIT 1",
-            (invoice_code, invoice_number),
-        )
+
+        if invoice_code:
+            row = self.db.fetch_one(
+                "SELECT id FROM invoices WHERE invoice_code = ? AND invoice_number = ? LIMIT 1",
+                (invoice_code, invoice_number),
+            )
+        else:
+            row = self.db.fetch_one(
+                "SELECT id FROM invoices WHERE invoice_number = ? LIMIT 1",
+                (invoice_number,),
+            )
         return row is not None
 
     def list_all(self) -> list[InvoiceRecord]:

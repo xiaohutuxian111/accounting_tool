@@ -4,8 +4,8 @@ app:
   theme_color: '#2dd36f'
   language: zh-CN
   remember_window_size: true
-  window_width: 1920
-  window_height: 1152
+  window_width: 1840
+  window_height: 1330
 ocr:
   engine: paddleocr
   lang: ch

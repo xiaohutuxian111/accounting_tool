@@ -16,13 +16,13 @@ class InvoiceLedgerService:
         self.repo = InvoiceRepository(self.db)
 
     def save_invoice_result(self, result: InvoiceOCRResult, source_file: str) -> tuple[bool, str, int | None]:
-        if self.repo.exists_by_code_number(result.invoice_code, result.invoice_number):
+        if self.repo.exists_by_code_number(None, result.invoice_number):
             return False, "该发票已存在，未重复入库", None
 
         verify_status = "已校验" if not result.errors else "待复核"
         record = InvoiceRecord(
             invoice_type=result.invoice_type,
-            invoice_code=result.invoice_code,
+            invoice_code=None,
             invoice_number=result.invoice_number,
             invoice_date=result.invoice_date,
             buyer_name=result.buyer_name,
