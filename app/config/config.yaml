@@ -1,11 +1,11 @@
 app:
-  name: 发票识别助手
+  name: 会计助手
   theme: dark
   theme_color: '#2dd36f'
   language: zh-CN
   remember_window_size: true
-  window_width: 1840
-  window_height: 1330
+  window_width: 1463
+  window_height: 1175
 ocr:
   engine: paddleocr
   lang: ch

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ import yaml
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "app": {
-        "name": "发票识别助手",
+        "name": "会计助手",
         "theme": "dark",
         "theme_color": "#2dd36f",
         "language": "zh-CN",
@@ -51,8 +52,9 @@ def deep_merge(base: dict, override: dict) -> dict:
 class AppConfig:
     def __init__(self, cli_args: argparse.Namespace | None = None) -> None:
         self.config = dict(DEFAULT_CONFIG)
+        self.runtime_root = self._resolve_runtime_root()
 
-        config_path = Path("config/config.yaml")
+        config_path = self.runtime_root / "config" / "config.yaml"
         if config_path.exists():
             with config_path.open("r", encoding="utf-8") as file:
                 file_config = yaml.safe_load(file) or {}
@@ -64,6 +66,29 @@ class AppConfig:
         if cli_args:
             cli_config = self._load_from_cli(cli_args)
             self.config = deep_merge(self.config, cli_config)
+
+        self._normalize_runtime_paths()
+
+    @staticmethod
+    def _resolve_runtime_root() -> Path:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+        return Path.cwd().resolve()
+
+    def _normalize_runtime_paths(self) -> None:
+        for section, key in [
+            ("storage", "db_path"),
+            ("storage", "export_dir"),
+            ("storage", "debug_dir"),
+            ("storage", "temp_dir"),
+            ("log", "dir"),
+        ]:
+            value = self.config.get(section, {}).get(key)
+            if not value:
+                continue
+            path = Path(value)
+            if not path.is_absolute():
+                self.config.setdefault(section, {})[key] = str((self.runtime_root / path).resolve())
 
     def _load_from_env(self) -> dict[str, Any]:
         env: dict[str, Any] = {}
@@ -109,6 +134,9 @@ class AppConfig:
         return current
 
     def save(self, path: str = "config/config.yaml") -> None:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as file:
+        save_path = Path(path)
+        if not save_path.is_absolute():
+            save_path = self.runtime_root / save_path
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, "w", encoding="utf-8") as file:
             yaml.safe_dump(self.config, file, allow_unicode=True, sort_keys=False)

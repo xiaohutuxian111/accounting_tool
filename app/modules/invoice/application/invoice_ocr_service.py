@@ -35,6 +35,7 @@ class InvoiceOCRService:
             result = self._process_image(image_path)
 
         result.source_file = image_path
+        result.amount_with_tax_cn = self._normalize_uppercase_amount(result)
         result.errors = InvoiceValidator.validate(result)
         return result
 
@@ -46,7 +47,7 @@ class InvoiceOCRService:
             )
         preprocessed_image = self.preprocessor.process(image_path)
         ocr_result = self.ocr_engine.recognize(preprocessed_image)
-        return self.parser.parse(ocr_result)
+        return self.parser.parse(ocr_result, preprocessed_image)
 
     def _process_pdf(self, pdf_path: str) -> InvoiceOCRResult:
         result = self.pdf_extractor.extract(pdf_path)
@@ -58,3 +59,9 @@ class InvoiceOCRService:
 
     def process_batch(self, image_paths: list[str]) -> list[InvoiceOCRResult]:
         return [self.process(path) for path in image_paths]
+
+    def _normalize_uppercase_amount(self, result: InvoiceOCRResult) -> str | None:
+        normalized = self.parser.extract_uppercase_amount(result.amount_with_tax_cn)
+        if normalized:
+            return normalized
+        return self.parser.extract_uppercase_amount_from_lines(result.raw_texts)

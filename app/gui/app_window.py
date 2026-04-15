@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from PySide6.QtGui import QCloseEvent, QGuiApplication
+from pathlib import Path
+import sys
+
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import FluentWindow, NavigationItemPosition, Theme, setTheme, setThemeColor
 
@@ -15,14 +18,15 @@ class AppWindow(FluentWindow):
         super().__init__()
         self.config = config
         self.settings_service = SettingsService(config)
+        self.app_icon = self._load_app_icon()
 
-        self.setWindowTitle(config.get("app.name", "发票识别助手"))
-        self.setWindowIcon(FIF.QUICK_NOTE.icon())
+        self.setWindowTitle(config.get("app.name", "会计助手"))
+        self.setWindowIcon(self.app_icon)
         self._apply_initial_window_size()
         self.setMinimumWidth(700)
 
         self.invoiceInterface = InvoiceOCRPage(config)
-        self.invoiceInterface.setWindowTitle("发票识别")
+        self.invoiceInterface.setWindowTitle(config.get("app.name", "会计助手"))
 
         self.settingsInterface = SettingsPage(config, self)
         self.settingsInterface.setWindowTitle("设置")
@@ -34,8 +38,19 @@ class AppWindow(FluentWindow):
         self.settingsInterface.theme_changed.connect(self.apply_theme)
         self.settingsInterface.theme_color_changed.connect(self.apply_theme_color)
 
+    @staticmethod
+    def _load_app_icon() -> QIcon:
+        if getattr(sys, "frozen", False):
+            base_path = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        else:
+            base_path = Path(__file__).resolve().parents[1]
+        icon_path = base_path / "assets" / "app_icon.png"
+        if icon_path.exists():
+            return QIcon(str(icon_path))
+        return FIF.DOCUMENT.icon()
+
     def _init_navigation(self):
-        self.addSubInterface(self.invoiceInterface, FIF.QUICK_NOTE, "发票识别")
+        self.addSubInterface(self.invoiceInterface, FIF.DOCUMENT, "发票识别")
         self.navigationInterface.addSeparator()
         self.addSubInterface(
             self.settingsInterface,

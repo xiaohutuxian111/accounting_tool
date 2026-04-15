@@ -1,8 +1,11 @@
 ﻿# -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import csv
 import json
+import zipfile
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from PySide6.QtCore import QEvent, QThread, Qt
 from PySide6.QtGui import QKeyEvent, QPixmap
@@ -11,6 +14,7 @@ from qfluentwidgets import BodyLabel, CaptionLabel, ElevatedCardWidget, FluentIc
 
 from app.modules.invoice.application.dto import InvoiceOCRResult
 from app.modules.invoice.application.invoice_ledger_service import InvoiceLedgerService
+from app.modules.invoice.domain.invoice_parser import InvoiceParser
 from app.modules.invoice.infrastructure.pdf_invoice_renderer import PDFInvoiceRenderer
 from app.modules.invoice.ui.invoice_ocr_worker import InvoiceOCRWorker
 
@@ -178,7 +182,7 @@ class InvoiceOCRPage(QWidget):
         self.btn_back_file = PushButton(FIF.LEFT_ARROW, '返回文件选择', action_card)
         self.btn_run = PrimaryPushButton(FIF.PLAY, '开始识别', action_card)
         self.btn_save_ledger = PushButton(FIF.SAVE, '批量保存到台账', action_card)
-        self.btn_export = PushButton(FIF.SHARE, '导出 JSON', action_card)
+        self.btn_export = PushButton(FIF.SHARE, '导出结果', action_card)
         self.resultStatePill = PillPushButton('等待识别', action_card)
         self.resultStatePill.setCheckable(False)
         self.btn_run.setEnabled(False)
@@ -198,7 +202,7 @@ class InvoiceOCRPage(QWidget):
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
         icon_label = QLabel(state_card)
-        icon_label.setPixmap(FIF.QUICK_NOTE.icon().pixmap(18, 18))
+        icon_label.setPixmap(FIF.DOCUMENT.icon().pixmap(18, 18))
         title_row.addWidget(icon_label, 0, Qt.AlignVCenter)
         title_row.addWidget(StrongBodyLabel('识别状态', state_card), 0, Qt.AlignVCenter)
         title_row.addStretch(1)
@@ -334,7 +338,7 @@ class InvoiceOCRPage(QWidget):
         self.btn_go_result.clicked.connect(self.go_to_result_step)
         self.btn_back_file.clicked.connect(lambda: self.stackedWidget.setCurrentWidget(self.fileInterface))
         self.btn_run.clicked.connect(self.run_ocr)
-        self.btn_export.clicked.connect(self.export_json)
+        self.btn_export.clicked.connect(self.export_results)
         self.btn_save_ledger.clicked.connect(self.save_to_ledger)
         self.fileList.currentRowChanged.connect(self.on_file_selection_changed)
         self.fileList.itemChanged.connect(self.on_file_check_changed)
@@ -707,20 +711,210 @@ class InvoiceOCRPage(QWidget):
         if selected:
             self._render_result_detail(selected[0].row())
 
-    def export_json(self):
-        if not self.batch_results:
-            return
+    def _export_base_name(self) -> str:
         if len(self.batch_results) == 1:
-            default_name = Path(self.batch_results[0].source_file or 'invoice').with_suffix('.json').name
+            return Path(self.batch_results[0].source_file or 'invoice').stem
+        return Path(self.input_source or 'invoice_batch').stem
+
+    def _export_headers(self) -> list[tuple[str, str]]:
+        return [
+            ('source_file', '来源文件'),
+            ('invoice_type', '发票类型'),
+            ('invoice_number', '发票号码'),
+            ('invoice_date', '开票日期'),
+            ('buyer_name', '购买方'),
+            ('buyer_tax_id', '购买方税号'),
+            ('seller_name', '销售方'),
+            ('seller_tax_id', '销售方税号'),
+            ('item_name', '项目名称'),
+            ('unit', '单位'),
+            ('quantity', '数量'),
+            ('unit_price', '单价'),
+            ('tax_rate', '税率/征收率'),
+            ('amount_without_tax', '不含税金额'),
+            ('tax_amount', '税额'),
+            ('amount_with_tax', '价税合计'),
+            ('amount_with_tax_cn', '价税合计大写'),
+            ('issuer', '开票人'),
+            ('remark', '备注'),
+            ('check_code', '校验码'),
+            ('confidence', '置信度'),
+            ('status', '状态'),
+            ('error_count', '错误数'),
+            ('errors', '错误信息'),
+            ('raw_text', '原始文本'),
+        ]
+
+    def _export_rows(self) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for result in self.batch_results:
+            rows.append({
+                'source_file': result.source_file or '',
+                'invoice_type': result.invoice_type or '',
+                'invoice_number': result.invoice_number or '',
+                'invoice_date': result.invoice_date or '',
+                'buyer_name': result.buyer_name or '',
+                'buyer_tax_id': result.buyer_tax_id or '',
+                'seller_name': result.seller_name or '',
+                'seller_tax_id': result.seller_tax_id or '',
+                'item_name': result.item_name or '',
+                'unit': result.unit or '',
+                'quantity': '' if result.quantity is None else str(result.quantity),
+                'unit_price': '' if result.unit_price is None else str(result.unit_price),
+                'tax_rate': result.tax_rate or '',
+                'amount_without_tax': '' if result.amount_without_tax is None else str(result.amount_without_tax),
+                'tax_amount': '' if result.tax_amount is None else str(result.tax_amount),
+                'amount_with_tax': '' if result.amount_with_tax is None else str(result.amount_with_tax),
+                'amount_with_tax_cn': InvoiceParser.extract_uppercase_amount(result.amount_with_tax_cn)
+                or InvoiceParser.extract_uppercase_amount_from_lines(result.raw_texts)
+                or '',
+                'issuer': result.issuer or '',
+                'remark': result.remark or '',
+                'check_code': result.check_code or '',
+                'confidence': '' if result.confidence is None else f'{result.confidence:.4f}',
+                'status': '待复核' if result.errors else '通过',
+                'error_count': str(len(result.errors)),
+                'errors': '；'.join(result.errors),
+                'raw_text': '\n'.join(result.raw_texts),
+            })
+        return rows
+
+    @staticmethod
+    def _xlsx_column_name(index: int) -> str:
+        name = ''
+        while index > 0:
+            index, remainder = divmod(index - 1, 26)
+            name = chr(65 + remainder) + name
+        return name
+
+    def _write_json_export(self, save_path: str) -> None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        if len(self.batch_results) == 1:
             payload = self.batch_results[0].to_dict()
         else:
-            default_name = f"{Path(self.input_source or 'invoice_batch').name}.json"
-            payload = {'mode': self.input_mode, 'source': self.input_source, 'count': len(self.batch_results), 'items': [result.to_dict() for result in self.batch_results]}
-        save_path, _ = QFileDialog.getSaveFileName(self, '导出 JSON', str(Path(self.config.get('storage.export_dir', 'data/export')) / default_name), 'JSON Files (*.json)')
+            payload = {
+                'mode': self.input_mode,
+                'source': self.input_source,
+                'count': len(self.batch_results),
+                'items': [result.to_dict() for result in self.batch_results],
+            }
+        Path(save_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    def _write_csv_export(self, save_path: str) -> None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        headers = self._export_headers()
+        rows = self._export_rows()
+        with open(save_path, 'w', encoding='utf-8-sig', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=[key for key, _ in headers])
+            writer.writerow({key: label for key, label in headers})
+            writer.writerows(rows)
+
+    def _write_xlsx_export(self, save_path: str) -> None:
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        headers = self._export_headers()
+        rows = self._export_rows()
+        sheet_rows = [[label for _, label in headers]]
+        sheet_rows.extend([[row[key] for key, _ in headers] for row in rows])
+
+        def cell_xml(value: str, row_index: int, col_index: int) -> str:
+            cell_ref = f'{self._xlsx_column_name(col_index)}{row_index}'
+            escaped = escape(value).replace('\n', '&#10;')
+            return f'<c r="{cell_ref}" t="inlineStr"><is><t xml:space="preserve">{escaped}</t></is></c>'
+
+        row_xml_parts: list[str] = []
+        for row_index, row_values in enumerate(sheet_rows, start=1):
+            cells = ''.join(cell_xml(str(value), row_index, col_index) for col_index, value in enumerate(row_values, start=1))
+            row_xml_parts.append(f'<row r="{row_index}">{cells}</row>')
+        sheet_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            f'<sheetData>{"".join(row_xml_parts)}</sheetData>'
+            '</worksheet>'
+        )
+
+        content_types_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            '</Types>'
+        )
+        rels_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>'
+        )
+        workbook_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<sheets><sheet name="识别结果" sheetId="1" r:id="rId1"/></sheets>'
+            '</workbook>'
+        )
+        workbook_rels_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '</Relationships>'
+        )
+        styles_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+            '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+            '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+            '</styleSheet>'
+        )
+
+        with zipfile.ZipFile(save_path, 'w', compression=zipfile.ZIP_DEFLATED) as workbook:
+            workbook.writestr('[Content_Types].xml', content_types_xml)
+            workbook.writestr('_rels/.rels', rels_xml)
+            workbook.writestr('xl/workbook.xml', workbook_xml)
+            workbook.writestr('xl/_rels/workbook.xml.rels', workbook_rels_xml)
+            workbook.writestr('xl/styles.xml', styles_xml)
+            workbook.writestr('xl/worksheets/sheet1.xml', sheet_xml)
+
+    def export_results(self):
+        if not self.batch_results:
+            return
+        base_name = self._export_base_name()
+        export_dir = Path(self.config.get('storage.export_dir', 'data/export'))
+        save_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            '导出识别结果',
+            str(export_dir / f'{base_name}.xlsx'),
+            'Excel Files (*.xlsx);;CSV Files (*.csv);;JSON Files (*.json)',
+        )
         if not save_path:
             return
-        Path(save_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
-        InfoBar.success('导出成功', f'JSON 已导出到 {save_path}', orient=Qt.Horizontal, isClosable=True, position=InfoBarPosition.TOP_RIGHT, duration=2500, parent=self.window())
+
+        path = Path(save_path)
+        if selected_filter.startswith('Excel') and path.suffix.lower() != '.xlsx':
+            path = path.with_suffix('.xlsx')
+        elif selected_filter.startswith('CSV') and path.suffix.lower() != '.csv':
+            path = path.with_suffix('.csv')
+        elif selected_filter.startswith('JSON') and path.suffix.lower() != '.json':
+            path = path.with_suffix('.json')
+
+        if path.suffix.lower() == '.csv':
+            self._write_csv_export(str(path))
+            export_type = 'CSV'
+        elif path.suffix.lower() == '.json':
+            self._write_json_export(str(path))
+            export_type = 'JSON'
+        else:
+            self._write_xlsx_export(str(path))
+            export_type = 'Excel'
+
+        InfoBar.success('导出成功', f'{export_type} 已导出到 {path}', orient=Qt.Horizontal, isClosable=True, position=InfoBarPosition.TOP_RIGHT, duration=2500, parent=self.window())
 
     def save_to_ledger(self):
         if not self.batch_results:
